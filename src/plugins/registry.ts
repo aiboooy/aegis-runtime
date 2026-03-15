@@ -6,6 +6,7 @@ import {
   applyExtensionHostTypedHookPolicy,
   bridgeExtensionHostLegacyHooks,
 } from "../extension-host/hook-compat.js";
+import { createExtensionHostPluginApi } from "../extension-host/plugin-api.js";
 import {
   addExtensionChannelRegistration,
   addExtensionCliRegistration,
@@ -37,7 +38,6 @@ import type {
   GatewayRequestHandlers,
 } from "../gateway/server-methods/types.js";
 import { registerInternalHook } from "../hooks/internal-hooks.js";
-import { resolveUserPath } from "../utils.js";
 import { registerPluginCommand } from "./commands.js";
 import { normalizeRegisteredProvider } from "./provider-validation.js";
 import type { PluginRuntime } from "./runtime/types.js";
@@ -514,13 +514,6 @@ export function createPluginRegistry(registryParams: PluginRegistryParams) {
     });
   };
 
-  const normalizeLogger = (logger: PluginLogger): PluginLogger => ({
-    info: logger.info,
-    warn: logger.warn,
-    error: logger.error,
-    debug: logger.debug,
-  });
-
   const createApi = (
     record: PluginRecord,
     params: {
@@ -529,21 +522,17 @@ export function createPluginRegistry(registryParams: PluginRegistryParams) {
       hookPolicy?: PluginTypedHookPolicy;
     },
   ): OpenClawPluginApi => {
-    return {
-      id: record.id,
-      name: record.name,
-      version: record.version,
-      description: record.description,
-      source: record.source,
+    return createExtensionHostPluginApi({
+      record,
+      runtime: registryParams.runtime,
+      logger: registryParams.logger,
       config: params.config,
       pluginConfig: params.pluginConfig,
-      runtime: registryParams.runtime,
-      logger: normalizeLogger(registryParams.logger),
       registerTool: (tool, opts) => registerTool(record, tool, opts),
       registerHook: (events, handler, opts) =>
         registerHook(record, events, handler, opts, params.config),
-      registerHttpRoute: (params) => registerHttpRoute(record, params),
-      registerChannel: (registration) => registerChannel(record, registration),
+      registerHttpRoute: (routeParams) => registerHttpRoute(record, routeParams),
+      registerChannel: (registration) => registerChannel(record, registration as never),
       registerProvider: (provider) => registerProvider(record, provider),
       registerGatewayMethod: (method, handler) => registerGatewayMethod(record, method, handler),
       registerCli: (registrar, opts) => registerCli(record, registrar, opts),
@@ -568,10 +557,9 @@ export function createPluginRegistry(registryParams: PluginRegistryParams) {
           registerEngine: registerContextEngine,
         });
       },
-      resolvePath: (input: string) => resolveUserPath(input),
       on: (hookName, handler, opts) =>
         registerTypedHook(record, hookName, handler, opts, params.hookPolicy),
-    };
+    });
   };
 
   return {
