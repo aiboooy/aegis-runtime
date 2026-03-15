@@ -109,9 +109,11 @@ export type PluginCommandRegistration = {
 
 export type PluginRecordLifecycleState =
   | "prepared"
+  | "imported"
   | "disabled"
   | "validated"
   | "registered"
+  | "ready"
   | "error";
 
 export type PluginRecord = {
