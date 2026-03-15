@@ -3,6 +3,10 @@ import type { ChannelDock } from "../channels/dock.js";
 import type { ChannelPlugin } from "../channels/plugins/types.js";
 import { registerContextEngine } from "../context-engine/registry.js";
 import {
+  addExtensionCliRegistration,
+  addExtensionCommandRegistration,
+  addExtensionServiceRegistration,
+  addExtensionToolRegistration,
   resolveExtensionChannelRegistration,
   resolveExtensionCliRegistration,
   resolveExtensionCommandRegistration,
@@ -219,10 +223,7 @@ export function createPluginRegistry(registryParams: PluginRegistryParams) {
       tool,
       opts,
     });
-    if (result.names.length > 0) {
-      record.toolNames.push(...result.names);
-    }
-    registry.tools.push(result.entry);
+    addExtensionToolRegistration({ registry, record, names: result.names, entry: result.entry });
   };
 
   const registerHook = (
@@ -380,8 +381,12 @@ export function createPluginRegistry(registryParams: PluginRegistryParams) {
       registrar,
       opts,
     });
-    record.cliCommands.push(...result.commands);
-    registry.cliRegistrars.push(result.entry);
+    addExtensionCliRegistration({
+      registry,
+      record,
+      commands: result.commands,
+      entry: result.entry,
+    });
   };
 
   const registerService = (record: PluginRecord, service: OpenClawPluginService) => {
@@ -393,8 +398,12 @@ export function createPluginRegistry(registryParams: PluginRegistryParams) {
     if (!result.ok) {
       return;
     }
-    record.services.push(result.serviceId);
-    registry.services.push(result.entry);
+    addExtensionServiceRegistration({
+      registry,
+      record,
+      serviceId: result.serviceId,
+      entry: result.entry,
+    });
   };
 
   const registerCommand = (record: PluginRecord, command: OpenClawPluginCommandDefinition) => {
@@ -425,8 +434,12 @@ export function createPluginRegistry(registryParams: PluginRegistryParams) {
       return;
     }
 
-    record.commands.push(normalized.commandName);
-    registry.commands.push(normalized.entry);
+    addExtensionCommandRegistration({
+      registry,
+      record,
+      commandName: normalized.commandName,
+      entry: normalized.entry,
+    });
   };
 
   const registerTypedHook = <K extends PluginHookName>(
