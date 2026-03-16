@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { existsSync, readdirSync, unlinkSync } from "node:fs";
 import { join, relative } from "node:path";
 import { runAgent } from "../gateway/client.js";
@@ -84,6 +85,7 @@ async function* runPhase(
   message: string,
   workspacePath: string,
   timeoutSeconds?: number,
+  sessionId?: string,
 ): AsyncGenerator<AgentEvent> {
   yield { type: "phase_start", agent: agentId, data: {}, timestamp: now() };
 
@@ -94,6 +96,7 @@ async function* runPhase(
       message,
       extraSystemPrompt: workspaceSystemPrompt(workspacePath),
       timeoutSeconds,
+      sessionId,
     });
   } catch (err) {
     yield {
@@ -122,6 +125,14 @@ export class SequentialProtocol implements Protocol {
   agents = ["architect", "main", "security"];
 
   async *execute(opts: BuildOpts): AsyncGenerator<AgentEvent> {
+    // Fresh session IDs per build — prevents context pollution between builds
+    const buildSession = randomUUID().slice(0, 8);
+    const sessions = {
+      architect: `aegis-${buildSession}-architect`,
+      main: `aegis-${buildSession}-builder`,
+      security: `aegis-${buildSession}-security`,
+    };
+
     // Phase 1: Architect
     let hadError = false;
     for await (const event of runPhase(
@@ -129,6 +140,7 @@ export class SequentialProtocol implements Protocol {
       buildArchitectPrompt(opts.prompt),
       opts.workspacePath,
       opts.timeoutSeconds,
+      sessions.architect,
     )) {
       yield event;
       if (event.type === "error") {
@@ -157,6 +169,7 @@ export class SequentialProtocol implements Protocol {
       buildBuilderPrompt(),
       opts.workspacePath,
       opts.timeoutSeconds,
+      sessions.main,
     )) {
       yield event;
       if (event.type === "error") {
@@ -173,6 +186,7 @@ export class SequentialProtocol implements Protocol {
       buildSecurityReviewPrompt(),
       opts.workspacePath,
       opts.timeoutSeconds,
+      sessions.security,
     )) {
       yield event;
       if (event.type === "error") {
@@ -195,12 +209,13 @@ export class SequentialProtocol implements Protocol {
         unlinkSync(reviewPath);
       }
 
-      // Builder fix round
+      // Builder fix round — same session so it remembers what it built
       for await (const event of runPhase(
         "main",
         buildFixPrompt(review.content),
         opts.workspacePath,
         opts.timeoutSeconds,
+        sessions.main,
       )) {
         yield event;
         if (event.type === "error") {
@@ -211,12 +226,13 @@ export class SequentialProtocol implements Protocol {
         return;
       }
 
-      // Security re-review
+      // Security re-review — same session for consistency
       for await (const event of runPhase(
         "security",
         buildSecurityReviewPrompt(),
         opts.workspacePath,
         opts.timeoutSeconds,
+        sessions.security,
       )) {
         yield event;
         if (event.type === "error") {

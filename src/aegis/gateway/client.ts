@@ -1,4 +1,4 @@
-import { resolveSessionKeyForRequest } from "../../commands/agent/session.js";
+import { randomUUID } from "node:crypto";
 import { loadConfig } from "../../config/config.js";
 import { callGateway, randomIdempotencyKey } from "../../gateway/call.js";
 import { GATEWAY_CLIENT_MODES, GATEWAY_CLIENT_NAMES } from "../../utils/message-channel.js";
@@ -8,6 +8,7 @@ export interface AgentRunOpts {
   message: string;
   timeoutSeconds?: number;
   extraSystemPrompt?: string;
+  sessionId?: string;
 }
 
 export interface AgentRunResult {
@@ -30,10 +31,8 @@ export async function runAgent(opts: AgentRunOpts): Promise<AgentRunResult> {
   const cfg = loadConfig();
   const timeoutSeconds = opts.timeoutSeconds ?? 600;
 
-  const { sessionKey } = resolveSessionKeyForRequest({
-    cfg,
-    agentId: opts.agentId,
-  });
+  // Use provided sessionId or generate a fresh one to avoid context pollution
+  const sessionId = opts.sessionId ?? `aegis-${randomUUID()}`;
 
   const response = await callGateway<GatewayAgentResponse>({
     config: cfg,
@@ -41,7 +40,7 @@ export async function runAgent(opts: AgentRunOpts): Promise<AgentRunResult> {
     params: {
       message: opts.message,
       agentId: opts.agentId,
-      sessionKey,
+      sessionId,
       deliver: false,
       timeout: timeoutSeconds,
       idempotencyKey: randomIdempotencyKey(),
