@@ -1,7 +1,10 @@
-import { existsSync, readdirSync } from "node:fs";
+import { existsSync, readdirSync, unlinkSync } from "node:fs";
 import { join, relative } from "node:path";
 import { runAgent } from "../gateway/client.js";
+import { parseSecurityReview } from "./security-review.js";
 import type { AgentEvent, BuildOpts, Protocol } from "./types.js";
+
+const MAX_FIX_ROUNDS = 2;
 
 function now(): string {
   return new Date().toISOString();
@@ -50,43 +53,93 @@ function buildBuilderPrompt(): string {
   ].join("\n");
 }
 
+function buildSecurityReviewPrompt(): string {
+  return [
+    "Review all code files in the current directory for security vulnerabilities.",
+    "Write your findings to SECURITY-REVIEW.md using your standard format.",
+    "Be thorough but only flag real, exploitable issues.",
+  ].join("\n");
+}
+
+function buildFixPrompt(reviewContent: string): string {
+  return [
+    "Read SECURITY-REVIEW.md in the current directory. It contains security vulnerabilities found in your code.",
+    "",
+    "Fix ALL Critical issues. Fix Warning issues where practical.",
+    "Do NOT delete or modify SECURITY-REVIEW.md — only fix the code files.",
+    "After fixing, briefly describe what you changed.",
+    "",
+    "Here are the findings:",
+    "",
+    reviewContent,
+  ].join("\n");
+}
+
 function workspaceSystemPrompt(workspacePath: string): string {
   return `IMPORTANT: Work exclusively in the directory: ${workspacePath}\nCreate all files there. Do not use any other directory.`;
 }
 
+async function* runPhase(
+  agentId: string,
+  message: string,
+  workspacePath: string,
+  timeoutSeconds?: number,
+): AsyncGenerator<AgentEvent> {
+  yield { type: "phase_start", agent: agentId, data: {}, timestamp: now() };
+
+  let result;
+  try {
+    result = await runAgent({
+      agentId,
+      message,
+      extraSystemPrompt: workspaceSystemPrompt(workspacePath),
+      timeoutSeconds,
+    });
+  } catch (err) {
+    yield {
+      type: "error",
+      agent: agentId,
+      data: { error: err instanceof Error ? err.message : String(err) },
+      timestamp: now(),
+    };
+    return;
+  }
+
+  const filesCreated = agentId === "main" ? listFilesRecursive(workspacePath) : undefined;
+
+  yield {
+    type: "agent_response",
+    agent: agentId,
+    data: { text: result.text, filesCreated },
+    timestamp: now(),
+  };
+
+  yield { type: "phase_end", agent: agentId, data: {}, timestamp: now() };
+}
+
 export class SequentialProtocol implements Protocol {
   name = "sequential";
-  agents = ["architect", "main"];
+  agents = ["architect", "main", "security"];
 
   async *execute(opts: BuildOpts): AsyncGenerator<AgentEvent> {
     // Phase 1: Architect
-    yield { type: "phase_start", agent: "architect", data: {}, timestamp: now() };
-
-    let archResult;
-    try {
-      archResult = await runAgent({
-        agentId: "architect",
-        message: buildArchitectPrompt(opts.prompt),
-        extraSystemPrompt: workspaceSystemPrompt(opts.workspacePath),
-        timeoutSeconds: opts.timeoutSeconds,
-      });
-    } catch (err) {
-      yield {
-        type: "error",
-        agent: "architect",
-        data: { error: err instanceof Error ? err.message : String(err) },
-        timestamp: now(),
-      };
+    let hadError = false;
+    for await (const event of runPhase(
+      "architect",
+      buildArchitectPrompt(opts.prompt),
+      opts.workspacePath,
+      opts.timeoutSeconds,
+    )) {
+      yield event;
+      if (event.type === "error") {
+        hadError = true;
+      }
+    }
+    if (hadError) {
       return;
     }
 
-    yield {
-      type: "agent_response",
-      agent: "architect",
-      data: { text: archResult.text },
-      timestamp: now(),
-    };
-
+    // Verify SPEC.md
     const specPath = join(opts.workspacePath, "SPEC.md");
     if (!existsSync(specPath)) {
       yield {
@@ -98,38 +151,83 @@ export class SequentialProtocol implements Protocol {
       return;
     }
 
-    yield { type: "phase_end", agent: "architect", data: {}, timestamp: now() };
-
     // Phase 2: Builder
-    yield { type: "phase_start", agent: "main", data: {}, timestamp: now() };
-
-    let buildResult;
-    try {
-      buildResult = await runAgent({
-        agentId: "main",
-        message: buildBuilderPrompt(),
-        extraSystemPrompt: workspaceSystemPrompt(opts.workspacePath),
-        timeoutSeconds: opts.timeoutSeconds,
-      });
-    } catch (err) {
-      yield {
-        type: "error",
-        agent: "main",
-        data: { error: err instanceof Error ? err.message : String(err) },
-        timestamp: now(),
-      };
+    for await (const event of runPhase(
+      "main",
+      buildBuilderPrompt(),
+      opts.workspacePath,
+      opts.timeoutSeconds,
+    )) {
+      yield event;
+      if (event.type === "error") {
+        hadError = true;
+      }
+    }
+    if (hadError) {
       return;
     }
 
-    const filesCreated = listFilesRecursive(opts.workspacePath);
+    // Phase 3: Security Review
+    for await (const event of runPhase(
+      "security",
+      buildSecurityReviewPrompt(),
+      opts.workspacePath,
+      opts.timeoutSeconds,
+    )) {
+      yield event;
+      if (event.type === "error") {
+        hadError = true;
+      }
+    }
+    if (hadError) {
+      return;
+    }
 
-    yield {
-      type: "agent_response",
-      agent: "main",
-      data: { text: buildResult.text, filesCreated },
-      timestamp: now(),
-    };
+    // Fix loop (if security review failed)
+    let review = parseSecurityReview(opts.workspacePath);
+    let fixRound = 0;
 
-    yield { type: "phase_end", agent: "main", data: {}, timestamp: now() };
+    while (review.status === "fail" && fixRound < MAX_FIX_ROUNDS) {
+      fixRound++;
+
+      const reviewPath = join(opts.workspacePath, "SECURITY-REVIEW.md");
+      if (existsSync(reviewPath)) {
+        unlinkSync(reviewPath);
+      }
+
+      // Builder fix round
+      for await (const event of runPhase(
+        "main",
+        buildFixPrompt(review.content),
+        opts.workspacePath,
+        opts.timeoutSeconds,
+      )) {
+        yield event;
+        if (event.type === "error") {
+          hadError = true;
+        }
+      }
+      if (hadError) {
+        return;
+      }
+
+      // Security re-review
+      for await (const event of runPhase(
+        "security",
+        buildSecurityReviewPrompt(),
+        opts.workspacePath,
+        opts.timeoutSeconds,
+      )) {
+        yield event;
+        if (event.type === "error") {
+          hadError = true;
+        }
+      }
+      if (hadError) {
+        return;
+      }
+
+      review = parseSecurityReview(opts.workspacePath);
+    }
   }
 }
