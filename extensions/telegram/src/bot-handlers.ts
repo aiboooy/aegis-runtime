@@ -1607,6 +1607,21 @@ export const registerTelegramHandlers = ({
     if (!msg) {
       return;
     }
+
+    // AEGIS build detection — intercept "build:" and "/build" messages
+    const msgText = msg.text ?? "";
+    try {
+      const { extractBuildPrompt, handleTelegramBuild } =
+        await import("../../../dist/aegis/build-handler.js");
+      const buildPrompt = extractBuildPrompt(msgText);
+      if (buildPrompt) {
+        await handleTelegramBuild(ctx, buildPrompt);
+        return;
+      }
+    } catch {
+      // AEGIS build handler not available — fall through to normal chat
+    }
+
     await handleInboundMessageLike({
       ctxForDedupe: ctx,
       ctx: buildSyntheticContext(ctx, msg),

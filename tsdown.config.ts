@@ -185,4 +185,9 @@ export default defineConfig([
     entry: "src/aegis/cli.ts",
     outDir: "dist/aegis",
   }),
+  nodeBuildConfig({
+    entry: {
+      "aegis/build-handler": "src/aegis/telegram/build-handler.ts",
+    },
+  }),
 ]);
