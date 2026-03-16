@@ -14,6 +14,7 @@
     "url": "git+https://github.com/openclaw/openclaw.git"
   },
   "bin": {
+    "aegis": "bin/aegis",
     "openclaw": "openclaw.mjs"
   },
   "directories": {
@@ -27,6 +28,7 @@
     "README-header.png",
     "README.md",
     "assets/",
+    "bin/",
     "dist/",
     "docs/",
     "extensions/",
