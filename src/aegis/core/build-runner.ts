@@ -8,6 +8,7 @@ import type { AgentEvent } from "../coordinator/types.js";
 import type { AuditPhase } from "../security/audit.js";
 import { createAuditEntry, writeAuditEntry, loadChain } from "../security/audit.js";
 import { acquireLock, releaseLock } from "../security/lock.js";
+import { captureScreenshot } from "./screenshot.js";
 
 const AEGIS_DIR = join(homedir(), ".aegis");
 const AUDIT_DIR = join(AEGIS_DIR, "audit");
@@ -29,6 +30,7 @@ export interface BuildResult {
   success: boolean;
   duration: number;
   securitySummary?: SecuritySummary;
+  screenshotPath?: string | null;
   events: AgentEvent[];
 }
 
@@ -170,6 +172,13 @@ export async function runBuild(
   });
   writeAuditEntry(AUDIT_DIR, entry);
 
+  let screenshotPath: string | null = null;
+  try {
+    screenshotPath = await captureScreenshot(workspacePath);
+  } catch {
+    // Screenshot failure is non-fatal
+  }
+
   return {
     buildId,
     workspacePath,
@@ -177,6 +186,7 @@ export async function runBuild(
     success,
     duration,
     securitySummary,
+    screenshotPath,
     events: allEvents,
   };
 }
