@@ -4,12 +4,14 @@ const BOLD = "\x1b[1m";
 const DIM = "\x1b[2m";
 const GREEN = "\x1b[32m";
 const RED = "\x1b[31m";
+const YELLOW = "\x1b[33m";
 const CYAN = "\x1b[36m";
 const RESET = "\x1b[0m";
 
 const agentLabels: Record<string, string> = {
   architect: "Architect",
   main: "Builder",
+  security: "Security",
 };
 
 function agentLabel(agent: string): string {
@@ -66,10 +68,21 @@ export function printBuildResult(opts: {
   workspacePath: string;
   duration: number;
   success: boolean;
+  securitySummary?: {
+    criticalFound: number;
+    criticalFixed: number;
+    warningCount: number;
+    fixRounds: number;
+    status: "pass" | "fail" | "unknown";
+  };
 }): void {
   console.log();
   if (opts.success) {
-    console.log(`  ${GREEN}${BOLD}Build complete!${RESET}`);
+    if (opts.securitySummary?.status === "fail") {
+      console.log(`  ${YELLOW}${BOLD}Build complete with security warnings!${RESET}`);
+    } else {
+      console.log(`  ${GREEN}${BOLD}Build complete!${RESET}`);
+    }
   } else {
     console.log(`  ${RED}${BOLD}Build failed${RESET}`);
   }
@@ -84,6 +97,25 @@ export function printBuildResult(opts: {
     }
     if (opts.filesCreated.length > 20) {
       console.log(`    ... (${opts.filesCreated.length - 20} more)`);
+    }
+    console.log();
+  }
+
+  if (opts.securitySummary && opts.securitySummary.status !== "unknown") {
+    const s = opts.securitySummary;
+    const remaining = s.criticalFound - s.criticalFixed;
+    if (s.criticalFound > 0) {
+      const fixInfo = s.fixRounds > 0 ? `, ${s.criticalFixed} fixed` : "";
+      const remainInfo = remaining > 0 ? ` (${remaining} remaining)` : "";
+      const statusLabel = remaining > 0 ? `${YELLOW}WARNING${RESET}` : `${GREEN}PASS${RESET}`;
+      console.log(
+        `  ${BOLD}Security:${RESET} ${s.criticalFound} critical found${fixInfo}${remainInfo} — ${statusLabel}`,
+      );
+    } else {
+      console.log(`  ${BOLD}Security:${RESET} ${GREEN}PASS${RESET} — no critical issues`);
+    }
+    if (s.warningCount > 0) {
+      console.log(`  ${DIM}  ${s.warningCount} warning(s)${RESET}`);
     }
     console.log();
   }

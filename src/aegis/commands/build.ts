@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { parseSecurityReview } from "../coordinator/security-review.js";
 import { SequentialProtocol } from "../coordinator/sequential.js";
 import type { AuditPhase } from "../security/audit.js";
 import { createAuditEntry, writeAuditEntry, loadChain } from "../security/audit.js";
@@ -43,6 +44,8 @@ export async function buildCommand(prompt: string): Promise<void> {
   let currentPhaseAgent = "";
   let filesCreated: string[] = [];
   let success = true;
+  let firstSecurityCriticalCount = 0;
+  let securityPhaseCount = 0;
 
   try {
     let phaseIndex = 0;
@@ -63,6 +66,14 @@ export async function buildCommand(prompt: string): Promise<void> {
           completed: event.timestamp,
           status: "success",
         });
+
+        if (currentPhaseAgent === "security") {
+          securityPhaseCount++;
+          if (securityPhaseCount === 1) {
+            const review = parseSecurityReview(workspacePath);
+            firstSecurityCriticalCount = review.criticalCount;
+          }
+        }
       }
 
       if (event.type === "agent_response" && event.data.filesCreated) {
@@ -88,22 +99,40 @@ export async function buildCommand(prompt: string): Promise<void> {
 
   const duration = Date.now() - startTime;
 
+  const finalReview = parseSecurityReview(workspacePath);
+  const fixRounds = securityPhaseCount > 1 ? securityPhaseCount - 1 : 0;
+  const criticalFixed = firstSecurityCriticalCount - finalReview.criticalCount;
+
+  const securitySummary =
+    securityPhaseCount > 0
+      ? {
+          criticalFound: firstSecurityCriticalCount,
+          criticalFixed: Math.max(0, criticalFixed),
+          warningCount: finalReview.warningCount,
+          fixRounds,
+          status: finalReview.status,
+        }
+      : undefined;
+
   const chain = loadChain(AUDIT_DIR);
   const prevHash = chain.length > 0 ? chain[chain.length - 1].hash : "";
+
+  const buildResult =
+    securitySummary?.status === "fail" ? "success-with-warnings" : success ? "success" : "error";
 
   const entry = createAuditEntry({
     buildId,
     prompt,
     agents: protocol.agents,
     phases,
-    result: success ? "success" : "error",
+    result: buildResult,
     filesCreated,
     duration: Math.round(duration / 1000),
     prevHash,
   });
   writeAuditEntry(AUDIT_DIR, entry);
 
-  printBuildResult({ buildId, filesCreated, workspacePath, duration, success });
+  printBuildResult({ buildId, filesCreated, workspacePath, duration, success, securitySummary });
 
   if (!success) {
     process.exit(1);
