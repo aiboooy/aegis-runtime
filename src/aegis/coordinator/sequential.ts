@@ -10,7 +10,9 @@ function now(): string {
 function listFilesRecursive(dir: string, base?: string): string[] {
   const root = base ?? dir;
   const files: string[] = [];
-  if (!existsSync(dir)) return files;
+  if (!existsSync(dir)) {
+    return files;
+  }
 
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
     const fullPath = join(dir, entry.name);

@@ -1,7 +1,7 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import type { AgentEvent } from "./types.js";
 
 vi.mock("../gateway/client.js", () => ({
@@ -66,7 +66,10 @@ describe("SequentialProtocol", () => {
 
   it("emits error and stops when architect fails to create SPEC.md", async () => {
     vi.mocked(runAgent).mockResolvedValueOnce({
-      runId: "r1", status: "completed", text: "I could not design this.", summary: "",
+      runId: "r1",
+      status: "completed",
+      text: "I could not design this.",
+      summary: "",
     });
 
     const protocol = new SequentialProtocol();
