@@ -1611,8 +1611,13 @@ export const registerTelegramHandlers = ({
     // AEGIS build detection — intercept "build:" and "/build" messages
     const msgText = msg.text ?? "";
     try {
-      const { extractBuildPrompt, handleTelegramBuild } =
-        await import("../../../dist/aegis/build-handler.js");
+      const handlerPath = require("node:path").join(
+        process.cwd(),
+        "dist",
+        "aegis",
+        "build-handler.js",
+      );
+      const { extractBuildPrompt, handleTelegramBuild } = await import(handlerPath);
       const buildPrompt = extractBuildPrompt(msgText);
       if (buildPrompt) {
         await handleTelegramBuild(ctx, buildPrompt);
